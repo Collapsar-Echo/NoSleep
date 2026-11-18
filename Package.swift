@@ -22,7 +22,8 @@ let package = Package(
                 "NoSleep.entitlements"
             ],
             linkerSettings: [
-                .linkedFramework("IOKit")
+                .linkedFramework("IOKit"),
+                .linkedFramework("ServiceManagement")
             ]
         ),
         .testTarget(

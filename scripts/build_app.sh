@@ -73,6 +73,7 @@ for ARCH in ${ARCHS}; do
         -framework SwiftUI \
         -framework AppKit \
         -framework IOKit \
+        -framework ServiceManagement \
         "${SWIFT_SOURCES[@]}" \
         -o "${OUT_BIN}"
 
@@ -158,7 +159,9 @@ func be32(_ value: UInt32) -> Data {
 }
 
 let chunks: [(String, Int)] = [
+    ("ic04", 16),
     ("ic11", 32),
+    ("ic05", 32),
     ("ic12", 64),
     ("ic07", 128),
     ("ic13", 256),
@@ -209,6 +212,11 @@ codesign \
     "${APP_BUNDLE}"
 
 codesign --verify --deep --strict "${APP_BUNDLE}"
+touch "${APP_BUNDLE}"
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+if [[ -x "${LSREGISTER}" ]]; then
+    "${LSREGISTER}" -f "${APP_BUNDLE}" >/dev/null 2>&1 || true
+fi
 
 echo "==> 打包 GitHub Release 压缩包..."
 ditto -c -k --sequesterRsrc --keepParent "${APP_BUNDLE}" "${ZIP_PATH}"

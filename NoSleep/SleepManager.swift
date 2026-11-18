@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import IOKit.pwr_mgt
+import ServiceManagement
 
 /// 防休眠断言级别，对应 IOKit 电源管理断言类型。
 enum SleepPreventionMode: String, CaseIterable, Identifiable, Sendable {
@@ -33,9 +34,9 @@ enum SleepPreventionMode: String, CaseIterable, Identifiable, Sendable {
     var shortTitle: String {
         switch self {
         case .keepDisplayAwake:
-            return "保持屏幕常亮"
+            return "屏幕常亮"
         case .keepSystemAwake:
-            return "允许显示器睡眠"
+            return "允许息屏"
         }
     }
 
@@ -110,6 +111,50 @@ enum MenuBarIconStyle: String, CaseIterable, Identifiable, Sendable {
         case .coffee:
             return "cup.and.saucer"
         }
+    }
+}
+
+/// 开机自启动状态。
+enum LaunchAtLoginStatus: Equatable, Sendable {
+    case enabled
+    case requiresApproval
+    case disabled
+}
+
+/// 开机自启动能力提供者协议，便于生产调用 ServiceManagement 与单元测试注入 Mock。
+protocol LaunchAtLoginProviding: Sendable {
+    var status: LaunchAtLoginStatus { get }
+    func setEnabled(_ enabled: Bool) throws
+    func openSystemSettings()
+}
+
+/// 基于 macOS 13+ `SMAppService.mainApp` 的原生开机自启动实现。
+struct ServiceManagementLaunchAtLoginProvider: LaunchAtLoginProviding {
+    var status: LaunchAtLoginStatus {
+        switch SMAppService.mainApp.status {
+        case .enabled:
+            return .enabled
+        case .requiresApproval:
+            return .requiresApproval
+        case .notRegistered, .notFound:
+            return .disabled
+        @unknown default:
+            return .disabled
+        }
+    }
+
+    func setEnabled(_ enabled: Bool) throws {
+        if enabled {
+            if SMAppService.mainApp.status != .enabled {
+                try SMAppService.mainApp.register()
+            }
+        } else if SMAppService.mainApp.status != .notRegistered {
+            try SMAppService.mainApp.unregister()
+        }
+    }
+
+    func openSystemSettings() {
+        SMAppService.openSystemSettingsLoginItems()
     }
 }
 
@@ -215,6 +260,7 @@ final class SleepManager: ObservableObject {
     @Published private(set) var remainingSeconds: Int?
     @Published private(set) var activeAssertionID: IOPMAssertionID?
     @Published private(set) var lastErrorMessage: String?
+    @Published private(set) var launchAtLoginStatus: LaunchAtLoginStatus
 
     @Published var showCountdownInMenuBar: Bool {
         didSet {
@@ -229,6 +275,7 @@ final class SleepManager: ObservableObject {
     }
 
     private let assertionGuard: AssertionGuard
+    private let launchAtLoginProvider: LaunchAtLoginProviding
     private let userDefaults: UserDefaults
     private let now: @Sendable () -> Date
     private var countdownTimer: Timer?
@@ -236,12 +283,15 @@ final class SleepManager: ObservableObject {
 
     init(
         provider: PowerAssertionProviding = IOKitPowerAssertionProvider(),
+        launchAtLoginProvider: LaunchAtLoginProviding = ServiceManagementLaunchAtLoginProvider(),
         userDefaults: UserDefaults = .standard,
         now: @escaping @Sendable () -> Date = Date.init
     ) {
         self.assertionGuard = AssertionGuard(provider: provider)
+        self.launchAtLoginProvider = launchAtLoginProvider
         self.userDefaults = userDefaults
         self.now = now
+        self.launchAtLoginStatus = launchAtLoginProvider.status
 
         if let rawMode = userDefaults.string(forKey: DefaultsKey.mode),
            let savedMode = SleepPreventionMode(rawValue: rawMode) {
@@ -375,6 +425,32 @@ final class SleepManager: ObservableObject {
     /// 便捷切换“允许显示器睡眠”状态。
     func setAllowDisplaySleep(_ allow: Bool) {
         setMode(allow ? .keepSystemAwake : .keepDisplayAwake)
+    }
+
+    /// 是否已开启开机自启动（含待系统设置授权状态）。
+    var isLaunchAtLoginEnabled: Bool {
+        launchAtLoginStatus != .disabled
+    }
+
+    /// 切换开机自启动状态（macOS 13+ SMAppService.mainApp）。
+    func setLaunchAtLogin(_ enabled: Bool) {
+        do {
+            try launchAtLoginProvider.setEnabled(enabled)
+            lastErrorMessage = nil
+        } catch {
+            lastErrorMessage = "开机自启动设置失败: \(error.localizedDescription)"
+        }
+        launchAtLoginStatus = launchAtLoginProvider.status
+    }
+
+    /// 同步系统设置中的最新登录项状态。
+    func refreshLaunchAtLoginStatus() {
+        launchAtLoginStatus = launchAtLoginProvider.status
+    }
+
+    /// 打开系统设置 → 通用 → 登录项面板。
+    func openLoginItemsSettings() {
+        launchAtLoginProvider.openSystemSettings()
     }
 
     /// 根据目标结束时间刷新剩余秒数，倒计时归零自动释放断言。

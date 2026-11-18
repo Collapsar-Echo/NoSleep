@@ -44,6 +44,35 @@ private final class MockPowerAssertionProvider: PowerAssertionProviding, @unchec
     }
 }
 
+private final class MockLaunchAtLoginProvider: LaunchAtLoginProviding, @unchecked Sendable {
+    private let lock = NSLock()
+    private var currentStatus: LaunchAtLoginStatus = .disabled
+    var errorToThrow: Error?
+    var nextEnableStatus: LaunchAtLoginStatus = .enabled
+    var openedSettingsCount = 0
+
+    var status: LaunchAtLoginStatus {
+        lock.lock()
+        defer { lock.unlock() }
+        return currentStatus
+    }
+
+    func setEnabled(_ enabled: Bool) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        if let errorToThrow {
+            throw errorToThrow
+        }
+        currentStatus = enabled ? nextEnableStatus : .disabled
+    }
+
+    func openSystemSettings() {
+        lock.lock()
+        defer { lock.unlock() }
+        openedSettingsCount += 1
+    }
+}
+
 private final class MutableClock: @unchecked Sendable {
     private let lock = NSLock()
     private var current: Date
@@ -73,13 +102,27 @@ private func makeIsolatedDefaults() -> UserDefaults {
     return defaults
 }
 
+@MainActor
+private func makeManager(
+    provider: MockPowerAssertionProvider = MockPowerAssertionProvider(),
+    launchAtLogin: MockLaunchAtLoginProvider = MockLaunchAtLoginProvider(),
+    now: @escaping @Sendable () -> Date = Date.init
+) -> SleepManager {
+    SleepManager(
+        provider: provider,
+        launchAtLoginProvider: launchAtLogin,
+        userDefaults: makeIsolatedDefaults(),
+        now: now
+    )
+}
+
 @Suite("SleepManager 状态机与电源断言测试")
 struct SleepManagerTests {
     @Test("初始状态为空闲且无活动断言")
     @MainActor
     func initialIdleState() {
         let provider = MockPowerAssertionProvider()
-        let manager = SleepManager(provider: provider, userDefaults: makeIsolatedDefaults())
+        let manager = makeManager(provider: provider)
 
         #expect(!manager.isActive)
         #expect(manager.mode == .keepDisplayAwake)
@@ -88,6 +131,7 @@ struct SleepManagerTests {
         #expect(manager.menuBarText == nil)
         #expect(manager.currentSymbolName == "bolt.slash")
         #expect(manager.sessionStatusText == "当前未开启防休眠")
+        #expect(!manager.isLaunchAtLoginEnabled)
         #expect(provider.snapshotEvents().isEmpty)
     }
 
@@ -95,7 +139,7 @@ struct SleepManagerTests {
     @MainActor
     func startAndSwitchModeReleasesPreviousAssertionFirst() {
         let provider = MockPowerAssertionProvider()
-        let manager = SleepManager(provider: provider, userDefaults: makeIsolatedDefaults())
+        let manager = makeManager(provider: provider)
 
         manager.start(duration: .indefinite)
         #expect(manager.isActive)
@@ -121,11 +165,7 @@ struct SleepManagerTests {
     func countdownTicksAndAutoReleasesAtZero() {
         let provider = MockPowerAssertionProvider()
         let clock = MutableClock(start: Date(timeIntervalSince1970: 1_700_000_000))
-        let manager = SleepManager(
-            provider: provider,
-            userDefaults: makeIsolatedDefaults(),
-            now: { clock.now() }
-        )
+        let manager = makeManager(provider: provider, now: { clock.now() })
 
         manager.start(duration: .fifteenMinutes)
         #expect(manager.isActive)
@@ -164,7 +204,7 @@ struct SleepManagerTests {
     @MainActor
     func restartSessionReleasesOldAssertion() {
         let provider = MockPowerAssertionProvider()
-        let manager = SleepManager(provider: provider, userDefaults: makeIsolatedDefaults())
+        let manager = makeManager(provider: provider)
 
         manager.start(duration: .thirtyMinutes)
         manager.start(duration: .twoHours)
@@ -183,7 +223,7 @@ struct SleepManagerTests {
     @MainActor
     func creationFailureCleansUpState() {
         let provider = MockPowerAssertionProvider()
-        let manager = SleepManager(provider: provider, userDefaults: makeIsolatedDefaults())
+        let manager = makeManager(provider: provider)
 
         manager.start(duration: .oneHour)
         #expect(manager.isActive)
@@ -206,7 +246,7 @@ struct SleepManagerTests {
         let provider = MockPowerAssertionProvider()
 
         do {
-            let manager = SleepManager(provider: provider, userDefaults: makeIsolatedDefaults())
+            let manager = makeManager(provider: provider)
             manager.start(duration: .indefinite)
             #expect(manager.isActive)
         }
@@ -221,7 +261,7 @@ struct SleepManagerTests {
     @MainActor
     func terminationNotificationReleasesActiveAssertion() async {
         let provider = MockPowerAssertionProvider()
-        let manager = SleepManager(provider: provider, userDefaults: makeIsolatedDefaults())
+        let manager = makeManager(provider: provider)
 
         manager.start(duration: .indefinite)
         NotificationCenter.default.post(name: NSApplication.willTerminateNotification, object: nil)
@@ -252,8 +292,7 @@ struct SleepManagerTests {
     @Test("菜单栏图标风格与倒计时显示开关生效")
     @MainActor
     func menuBarVisualPreferences() {
-        let provider = MockPowerAssertionProvider()
-        let manager = SleepManager(provider: provider, userDefaults: makeIsolatedDefaults())
+        let manager = makeManager()
 
         manager.iconStyle = .coffee
         #expect(manager.currentSymbolName == "cup.and.saucer")
@@ -264,5 +303,36 @@ struct SleepManagerTests {
 
         manager.showCountdownInMenuBar = false
         #expect(manager.menuBarText == nil)
+    }
+
+    @Test("开机自启动状态切换与待授权提示生效")
+    @MainActor
+    func launchAtLoginTransitions() {
+        let loginProvider = MockLaunchAtLoginProvider()
+        let manager = makeManager(launchAtLogin: loginProvider)
+
+        #expect(manager.launchAtLoginStatus == .disabled)
+        #expect(!manager.isLaunchAtLoginEnabled)
+
+        manager.setLaunchAtLogin(true)
+        #expect(manager.launchAtLoginStatus == .enabled)
+        #expect(manager.isLaunchAtLoginEnabled)
+        #expect(manager.lastErrorMessage == nil)
+
+        manager.setLaunchAtLogin(false)
+        #expect(manager.launchAtLoginStatus == .disabled)
+        #expect(!manager.isLaunchAtLoginEnabled)
+
+        loginProvider.nextEnableStatus = .requiresApproval
+        manager.setLaunchAtLogin(true)
+        #expect(manager.launchAtLoginStatus == .requiresApproval)
+        #expect(manager.isLaunchAtLoginEnabled)
+
+        manager.openLoginItemsSettings()
+        #expect(loginProvider.openedSettingsCount == 1)
+
+        loginProvider.errorToThrow = NSError(domain: "NoSleepTest", code: 1)
+        manager.setLaunchAtLogin(false)
+        #expect(manager.lastErrorMessage != nil)
     }
 }

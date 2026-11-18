@@ -1,13 +1,12 @@
 import AppKit
 import SwiftUI
 
-/// 菜单栏弹出面板视图，参考经典防休眠工具布局，全部交互均在沙盒内原生生效。
+/// 菜单栏弹出面板视图，紧凑布局并消除重复设置项，全部交互均在沙盒内原生生效。
 struct MenuBarView: View {
     @ObservedObject var sleepManager: SleepManager
 
     private enum PanelPage {
         case main
-        case preferences
         case about
     }
 
@@ -15,7 +14,7 @@ struct MenuBarView: View {
         case minutes
         case hours
         case custom
-        case quickSettings
+        case preferences
     }
 
     @State private var currentPage: PanelPage = .main
@@ -45,14 +44,15 @@ struct MenuBarView: View {
             switch currentPage {
             case .main:
                 mainPanel
-            case .preferences:
-                preferencesPanel
             case .about:
                 aboutPanel
             }
         }
-        .frame(width: 316)
-        .padding(.vertical, 8)
+        .frame(width: 276)
+        .padding(.vertical, 5)
+        .onAppear {
+            sleepManager.refreshLaunchAtLoginStatus()
+        }
     }
 
     // MARK: - 主面板
@@ -63,65 +63,40 @@ struct MenuBarView: View {
             sectionDivider
             newSessionSection
             sectionDivider
-            settingsSection
+            preferencesSection
             sectionDivider
-            aboutSection
-            sectionDivider
-            quitSection
+            footerSection
         }
     }
 
     private var sessionDetailsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 5) {
             Text("当前会话详细信息:")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(sleepManager.sessionStatusText)
-                    .font(.system(size: 16, weight: .bold))
+                    .font(.system(size: 15, weight: .bold))
                     .monospacedDigit()
                     .foregroundStyle(sleepManager.isActive ? .primary : .secondary)
 
-                HStack(spacing: 6) {
+                HStack(spacing: 5) {
                     Circle()
                         .fill(statusIndicatorColor)
-                        .frame(width: 7, height: 7)
-                    Text(sleepManager.isActive ? sleepManager.mode.title : "空闲状态 · 系统将按电源设置正常休眠")
+                        .frame(width: 6, height: 6)
+                    Text(sleepManager.isActive ? sleepManager.mode.title : "空闲 · 系统按电源设置正常休眠")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
             }
-            .padding(.leading, 12)
+            .padding(.leading, 10)
 
-            VStack(alignment: .leading, spacing: 6) {
-                Toggle(
-                    "允许显示器睡眠",
-                    isOn: Binding(
-                        get: { sleepManager.allowDisplaySleep },
-                        set: { sleepManager.setAllowDisplaySleep($0) }
-                    )
-                )
+            Toggle("在菜单栏显示倒计时", isOn: $sleepManager.showCountdownInMenuBar)
                 .toggleStyle(MacCheckboxToggleStyle())
-
-                Toggle(
-                    "在菜单栏显示倒计时",
-                    isOn: $sleepManager.showCountdownInMenuBar
-                )
-                .toggleStyle(MacCheckboxToggleStyle())
-
-                Toggle(
-                    "使用咖啡杯状态图标",
-                    isOn: Binding(
-                        get: { sleepManager.iconStyle == .coffee },
-                        set: { sleepManager.iconStyle = $0 ? .coffee : .bolt }
-                    )
-                )
-                .toggleStyle(MacCheckboxToggleStyle())
-            }
-            .padding(.leading, 12)
-            .padding(.top, 2)
+                .padding(.leading, 10)
+                .padding(.top, 1)
 
             Button {
                 if sleepManager.isActive {
@@ -132,32 +107,32 @@ struct MenuBarView: View {
             } label: {
                 Text(sleepManager.isActive ? "结束当前会话" : "开启无限期会话")
                     .font(.system(size: 12, weight: .medium))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 5)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
             }
             .buttonStyle(SessionActionButtonStyle(isActive: sleepManager.isActive))
-            .padding(.leading, 12)
-            .padding(.top, 2)
+            .padding(.leading, 10)
+            .padding(.top, 1)
 
             if let errorMessage = sleepManager.lastErrorMessage {
                 Text(errorMessage)
                     .font(.system(size: 11))
                     .foregroundStyle(.red)
-                    .padding(.leading, 12)
+                    .padding(.leading, 10)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
     }
 
     private var newSessionSection: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 1) {
             Text("开启新会话:")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 14)
-                .padding(.top, 4)
-                .padding(.bottom, 2)
+                .padding(.horizontal, 12)
+                .padding(.top, 2)
+                .padding(.bottom, 1)
 
             MenuActionRow(
                 title: "无限期",
@@ -208,57 +183,45 @@ struct MenuBarView: View {
                 customTimerCard
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 1)
     }
 
-    private var settingsSection: some View {
-        VStack(alignment: .leading, spacing: 2) {
+    private var preferencesSection: some View {
+        VStack(alignment: .leading, spacing: 1) {
             MenuActionRow(
-                title: "快速设置",
-                trailingSymbol: expandedSection == .quickSettings ? "chevron.down" : "play.fill",
-                isExpanded: expandedSection == .quickSettings
+                title: "偏好设置",
+                trailingSymbol: expandedSection == .preferences ? "chevron.down" : "play.fill",
+                isExpanded: expandedSection == .preferences
             ) {
-                toggleExpanded(.quickSettings)
+                toggleExpanded(.preferences)
             }
 
-            if expandedSection == .quickSettings {
-                quickSettingsCard
+            if expandedSection == .preferences {
+                preferencesCard
             }
-
-            MenuActionRow(
-                title: "偏好设置...",
-                shortcutText: "⌘,"
-            ) {
-                expandedSection = nil
-                currentPage = .preferences
-            }
-            .keyboardShortcut(",", modifiers: .command)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 1)
     }
 
-    private var aboutSection: some View {
-        VStack(alignment: .leading, spacing: 2) {
+    private var footerSection: some View {
+        VStack(alignment: .leading, spacing: 1) {
             MenuActionRow(title: "关于 NoSleep") {
                 expandedSection = nil
                 currentPage = .about
             }
-        }
-        .padding(.vertical, 2)
-    }
 
-    private var quitSection: some View {
-        VStack(alignment: .leading, spacing: 2) {
+            sectionDivider
+
             MenuActionRow(title: "关闭 NoSleep", shortcutText: "⌘Q") {
                 sleepManager.stop()
                 NSApplication.shared.terminate(nil)
             }
             .keyboardShortcut("q", modifiers: .command)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 1)
     }
 
-    // MARK: - 内联子菜单与自定义面板
+    // MARK: - 内联子菜单与偏好设置面板
 
     private func presetSubmenu(items: [(label: String, duration: SleepDuration)]) -> some View {
         VStack(alignment: .leading, spacing: 1) {
@@ -266,17 +229,17 @@ struct MenuBarView: View {
                 MenuActionRow(
                     title: item.label,
                     isCheckmarked: sleepManager.isActive && sleepManager.activeDuration == item.duration,
-                    leadingPadding: 38
+                    leadingPadding: 34
                 ) {
                     startSession(item.duration)
                 }
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 1)
     }
 
     private var customTimerCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             Picker("", selection: $customInputMode) {
                 Text("指定时长").tag(0)
                 Text("直到时间").tag(1)
@@ -285,9 +248,9 @@ struct MenuBarView: View {
             .labelsHidden()
 
             if customInputMode == 0 {
-                HStack(spacing: 12) {
-                    Stepper("\(customHours) 小时", value: $customHours, in: 0...24)
-                    Stepper("\(customMinutes) 分钟", value: $customMinutes, in: 0...59)
+                HStack(spacing: 10) {
+                    Stepper("\(customHours) 时", value: $customHours, in: 0...24)
+                    Stepper("\(customMinutes) 分", value: $customMinutes, in: 0...59)
                 }
                 .font(.system(size: 12))
             } else {
@@ -311,18 +274,18 @@ struct MenuBarView: View {
                 .disabled(customInputMode == 0 && customHours == 0 && customMinutes == 0)
             }
         }
-        .padding(10)
+        .padding(8)
         .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .fill(Color.primary.opacity(0.06))
         )
-        .padding(.horizontal, 14)
-        .padding(.vertical, 4)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 3)
     }
 
-    private var quickSettingsCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            VStack(alignment: .leading, spacing: 4) {
+    private var preferencesCard: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text("防休眠级别")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
@@ -341,7 +304,7 @@ struct MenuBarView: View {
                 .labelsHidden()
             }
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text("菜单栏图标")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
@@ -353,111 +316,45 @@ struct MenuBarView: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
             }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 5) {
+                Toggle(
+                    "开机自启动",
+                    isOn: Binding(
+                        get: { sleepManager.isLaunchAtLoginEnabled },
+                        set: { sleepManager.setLaunchAtLogin($0) }
+                    )
+                )
+                .toggleStyle(MacCheckboxToggleStyle())
+
+                if sleepManager.launchAtLoginStatus == .requiresApproval {
+                    Button {
+                        sleepManager.openLoginItemsSettings()
+                    } label: {
+                        Text("需在「系统设置 → 登录项」中允许 ↗")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Color.accentColor)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.leading, 22)
+                }
+            }
         }
-        .padding(10)
+        .padding(8)
         .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .fill(Color.primary.opacity(0.06))
         )
-        .padding(.horizontal, 14)
-        .padding(.vertical, 4)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 3)
     }
 
-    // MARK: - 偏好设置与关于二级页面
-
-    private var preferencesPanel: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            subPageHeader(title: "偏好设置")
-
-            VStack(alignment: .leading, spacing: 10) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("默认防休眠模式")
-                        .font(.system(size: 12, weight: .semibold))
-                    Picker(
-                        "",
-                        selection: Binding(
-                            get: { sleepManager.mode },
-                            set: { sleepManager.setMode($0) }
-                        )
-                    ) {
-                        ForEach(SleepPreventionMode.allCases) { mode in
-                            Text(mode.title).tag(mode)
-                        }
-                    }
-                    .labelsHidden()
-                    Text(sleepManager.mode.subtitle)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("菜单栏视觉反馈")
-                        .font(.system(size: 12, weight: .semibold))
-                    Picker("图标样式", selection: $sleepManager.iconStyle) {
-                        ForEach(MenuBarIconStyle.allCases) { style in
-                            Label(style.displayName, systemImage: style.activeSymbol)
-                                .tag(style)
-                        }
-                    }
-                    Toggle("在菜单栏图标旁显示倒计时", isOn: $sleepManager.showCountdownInMenuBar)
-                        .toggleStyle(MacCheckboxToggleStyle())
-                }
-            }
-            .padding(.horizontal, 14)
-            .padding(.bottom, 6)
-        }
-    }
+    // MARK: - 关于页面
 
     private var aboutPanel: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            subPageHeader(title: "关于 NoSleep")
-
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 10) {
-                    Image(systemName: sleepManager.iconStyle.activeSymbol)
-                        .font(.system(size: 24))
-                        .foregroundStyle(Color.accentColor)
-                        .frame(width: 36, height: 36)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(Color.accentColor.opacity(0.14))
-                        )
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("NoSleep")
-                            .font(.system(size: 15, weight: .bold))
-                        Text("版本 1.0.0 · SwiftUI + IOKit.pwr_mgt")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("底层电源管理状态")
-                        .font(.system(size: 12, weight: .semibold))
-                    Text("断言状态: \(sleepManager.isActive ? "已激活" : "未激活")")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                    Text("断言类型: \(sleepManager.mode.assertionType as String)")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                    if let assertionID = sleepManager.activeAssertionID {
-                        Text("IOPMAssertionID: \(assertionID)")
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-            .padding(.horizontal, 14)
-            .padding(.bottom, 6)
-        }
-    }
-
-    private func subPageHeader(title: String) -> some View {
-        VStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Button {
                     currentPage = .main
@@ -473,25 +370,73 @@ struct MenuBarView: View {
 
                 Spacer()
 
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold))
+                Text("关于 NoSleep")
+                    .font(.system(size: 12.5, weight: .semibold))
 
                 Spacer()
 
-                Color.clear.frame(width: 44, height: 1)
+                Color.clear.frame(width: 40, height: 1)
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 4)
+            .padding(.horizontal, 12)
+            .padding(.top, 2)
 
             Divider()
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 9) {
+                    Image(systemName: sleepManager.iconStyle.activeSymbol)
+                        .font(.system(size: 20))
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 32, height: 32)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .fill(Color.accentColor.opacity(0.14))
+                        )
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("NoSleep")
+                            .font(.system(size: 14, weight: .bold))
+                        Text("v\(appVersion) · SwiftUI + IOKit.pwr_mgt")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("底层电源管理状态")
+                        .font(.system(size: 11.5, weight: .semibold))
+                    Text("断言状态: \(sleepManager.isActive ? "已激活" : "未激活")")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    Text("断言类型: \(sleepManager.mode.assertionType as String)")
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    if let assertionID = sleepManager.activeAssertionID {
+                        Text("IOPMAssertionID: \(assertionID)")
+                            .font(.system(size: 10.5, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("菜单栏提示: 按住 ⌘ 可自由拖动图标位置")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 2)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 4)
         }
     }
 
     // MARK: - 辅助方法
 
+    private var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.1"
+    }
+
     private var sectionDivider: some View {
         Divider()
-            .padding(.vertical, 4)
+            .padding(.vertical, 2)
     }
 
     private var statusIndicatorColor: Color {
@@ -505,6 +450,9 @@ struct MenuBarView: View {
         } else {
             if section == .custom {
                 targetTime = Date().addingTimeInterval(3600)
+            }
+            if section == .preferences {
+                sleepManager.refreshLaunchAtLoginStatus()
             }
             expandedSection = section
         }
@@ -548,40 +496,40 @@ private struct MenuActionRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 if isCheckmarked {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 11, weight: .semibold))
-                        .frame(width: 12)
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .frame(width: 11)
                 }
 
                 Text(title)
-                    .font(.system(size: 13))
+                    .font(.system(size: 12.5))
                     .lineLimit(1)
 
                 Spacer()
 
                 if let shortcutText {
                     Text(shortcutText)
-                        .font(.system(size: 12))
+                        .font(.system(size: 11.5))
                         .foregroundStyle(isHovered ? Color.white.opacity(0.85) : Color.secondary)
                 }
 
                 if let trailingSymbol {
                     Image(systemName: trailingSymbol)
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(.system(size: 8.5, weight: .semibold))
                         .foregroundStyle(isHovered ? Color.white.opacity(0.9) : Color.secondary)
                 }
             }
             .foregroundStyle(isHovered ? Color.white : Color.primary)
             .padding(.leading, resolvedLeadingPadding)
-            .padding(.trailing, 14)
-            .padding(.vertical, 4)
+            .padding(.trailing, 12)
+            .padding(.vertical, 3)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
                     .fill(rowBackground)
-                    .padding(.horizontal, 6)
+                    .padding(.horizontal, 5)
             )
             .contentShape(Rectangle())
         }
@@ -595,7 +543,7 @@ private struct MenuActionRow: View {
         if let leadingPadding {
             return leadingPadding
         }
-        return isIndented ? 26 : 14
+        return isIndented ? 22 : 12
     }
 
     private var rowBackground: Color {
@@ -614,22 +562,22 @@ private struct MacCheckboxToggleStyle: ToggleStyle {
         Button {
             configuration.isOn.toggle()
         } label: {
-            HStack(spacing: 8) {
+            HStack(spacing: 7) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    RoundedRectangle(cornerRadius: 3.5, style: .continuous)
                         .fill(configuration.isOn ? Color.accentColor : Color.primary.opacity(0.12))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            RoundedRectangle(cornerRadius: 3.5, style: .continuous)
                                 .strokeBorder(
                                     configuration.isOn ? Color.accentColor : Color.primary.opacity(0.25),
                                     lineWidth: 1
                                 )
                         )
-                        .frame(width: 14, height: 14)
+                        .frame(width: 13, height: 13)
 
                     if configuration.isOn {
                         Image(systemName: "checkmark")
-                            .font(.system(size: 9, weight: .bold))
+                            .font(.system(size: 8.5, weight: .bold))
                             .foregroundStyle(.white)
                     }
                 }
@@ -651,10 +599,10 @@ private struct SessionActionButtonStyle: ButtonStyle {
         configuration.label
             .foregroundStyle(isActive ? Color.primary : Color.white)
             .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                RoundedRectangle(cornerRadius: 5.5, style: .continuous)
                     .fill(backgroundColor(isPressed: configuration.isPressed))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        RoundedRectangle(cornerRadius: 5.5, style: .continuous)
                             .strokeBorder(Color.primary.opacity(isActive ? 0.16 : 0), lineWidth: 1)
                     )
             )
