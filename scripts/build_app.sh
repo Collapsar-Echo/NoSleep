@@ -12,11 +12,14 @@ SRC_DIR="${ROOT_DIR}/NoSleep"
 DIST_DIR="${ROOT_DIR}/dist"
 APP_BUNDLE="${DIST_DIR}/${APP_NAME}.app"
 ZIP_PATH="${DIST_DIR}/${APP_NAME}-macOS.zip"
-CONTENTS_DIR="${APP_BUNDLE}/Contents"
-MACOS_DIR="${CONTENTS_DIR}/MacOS"
-RESOURCES_DIR="${CONTENTS_DIR}/Resources"
 
 TMP_DIR="$(mktemp -d /tmp/nosleep-build.XXXXXX)"
+STAGE_DIR="${TMP_DIR}/stage"
+STAGE_APP="${STAGE_DIR}/${APP_NAME}.app"
+STAGE_ZIP="${STAGE_DIR}/${APP_NAME}-macOS.zip"
+CONTENTS_DIR="${STAGE_APP}/Contents"
+MACOS_DIR="${CONTENTS_DIR}/MacOS"
+RESOURCES_DIR="${CONTENTS_DIR}/Resources"
 cleanup() {
     rm -rf "${TMP_DIR}"
 }
@@ -80,7 +83,6 @@ for ARCH in ${ARCHS}; do
     ARCH_BINS+=("${OUT_BIN}")
 done
 
-rm -rf "${APP_BUNDLE}" "${ZIP_PATH}"
 mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
 
 if [[ "${#ARCH_BINS[@]}" -eq 1 ]]; then
@@ -209,17 +211,22 @@ codesign \
     --deep \
     --sign "${SIGN_IDENTITY}" \
     --entitlements "${SRC_DIR}/${APP_NAME}.entitlements" \
-    "${APP_BUNDLE}"
+    "${STAGE_APP}"
 
-codesign --verify --deep --strict "${APP_BUNDLE}"
+codesign --verify --deep --strict "${STAGE_APP}"
+
+echo "==> 打包 GitHub Release 压缩包..."
+ditto -c -k --sequesterRsrc --keepParent "${STAGE_APP}" "${STAGE_ZIP}"
+
+mkdir -p "${DIST_DIR}"
+rm -rf "${APP_BUNDLE}" "${ZIP_PATH}"
+mv "${STAGE_APP}" "${APP_BUNDLE}"
+mv "${STAGE_ZIP}" "${ZIP_PATH}"
 touch "${APP_BUNDLE}"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 if [[ -x "${LSREGISTER}" ]]; then
     "${LSREGISTER}" -f "${APP_BUNDLE}" >/dev/null 2>&1 || true
 fi
-
-echo "==> 打包 GitHub Release 压缩包..."
-ditto -c -k --sequesterRsrc --keepParent "${APP_BUNDLE}" "${ZIP_PATH}"
 
 echo "✅ 打包完成:"
 echo "   App: ${APP_BUNDLE}"

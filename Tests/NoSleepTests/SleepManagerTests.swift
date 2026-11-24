@@ -240,33 +240,42 @@ struct SleepManagerTests {
         ])
     }
 
-    @Test("deinit 兜底自动释放活动电源断言")
+    @Test("deinit 兜底自动释放活动电源断言与倒计时定时器")
     @MainActor
     func deinitReleasesActiveAssertion() {
         let provider = MockPowerAssertionProvider()
 
         do {
             let manager = makeManager(provider: provider)
-            manager.start(duration: .indefinite)
+            manager.start(duration: .fifteenMinutes)
             #expect(manager.isActive)
+            #expect(manager.isCountdownTimerRunning)
         }
 
         #expect(provider.snapshotEvents() == [
             .create(type: "NoDisplaySleepAssertion", id: 101),
             .release(id: 101)
         ])
+
+        let box = CountdownTimerBox()
+        box.schedule(interval: 1.0) {}
+        #expect(box.isRunning)
+        box.cancel()
+        #expect(!box.isRunning)
     }
 
-    @Test("收到应用退出通知时强制释放断言")
+    @Test("收到应用退出通知时强制释放断言并停止倒计时定时器")
     @MainActor
     func terminationNotificationReleasesActiveAssertion() async {
         let provider = MockPowerAssertionProvider()
         let manager = makeManager(provider: provider)
 
-        manager.start(duration: .indefinite)
+        manager.start(duration: .fifteenMinutes)
+        #expect(manager.isCountdownTimerRunning)
         NotificationCenter.default.post(name: NSApplication.willTerminateNotification, object: nil)
         await Task.yield()
 
+        #expect(!manager.isCountdownTimerRunning)
         #expect(provider.snapshotEvents() == [
             .create(type: "NoDisplaySleepAssertion", id: 101),
             .release(id: 101)
@@ -334,5 +343,19 @@ struct SleepManagerTests {
         loginProvider.errorToThrow = NSError(domain: "NoSleepTest", code: 1)
         manager.setLaunchAtLogin(false)
         #expect(manager.lastErrorMessage != nil)
+
+        // 系统设置中状态变化后刷新应自动清除开机自启动错误提示
+        loginProvider.errorToThrow = nil
+        try? loginProvider.setEnabled(false)
+        manager.refreshLaunchAtLoginStatus()
+        #expect(manager.launchAtLoginStatus == .disabled)
+        #expect(manager.lastErrorMessage == nil)
+
+        // stop() 也应清空残留错误提示
+        loginProvider.errorToThrow = NSError(domain: "NoSleepTest", code: 2)
+        manager.setLaunchAtLogin(true)
+        #expect(manager.lastErrorMessage != nil)
+        manager.stop()
+        #expect(manager.lastErrorMessage == nil)
     }
 }

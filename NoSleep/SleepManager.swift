@@ -144,11 +144,12 @@ struct ServiceManagementLaunchAtLoginProvider: LaunchAtLoginProviding {
     }
 
     func setEnabled(_ enabled: Bool) throws {
+        let current = SMAppService.mainApp.status
         if enabled {
-            if SMAppService.mainApp.status != .enabled {
+            if current != .enabled {
                 try SMAppService.mainApp.register()
             }
-        } else if SMAppService.mainApp.status != .notRegistered {
+        } else if current == .enabled || current == .requiresApproval {
             try SMAppService.mainApp.unregister()
         }
     }
@@ -242,6 +243,46 @@ private final class AssertionGuard: @unchecked Sendable {
     }
 }
 
+/// 线程安全的倒计时定时器容器。
+/// 基于 `DispatchSourceTimer` 实现，支持在任意线程（含 `nonisolated deinit`）安全调用 `cancel()`。
+final class CountdownTimerBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var timer: DispatchSourceTimer?
+
+    func schedule(interval: TimeInterval, handler: @escaping @Sendable () -> Void) {
+        let source = DispatchSource.makeTimerSource(queue: .main)
+        source.schedule(
+            deadline: .now() + interval,
+            repeating: interval,
+            leeway: .milliseconds(50)
+        )
+        source.setEventHandler(handler: handler)
+
+        lock.lock()
+        let previous = timer
+        timer = source
+        lock.unlock()
+
+        previous?.cancel()
+        source.resume()
+    }
+
+    func cancel() {
+        lock.lock()
+        let previous = timer
+        timer = nil
+        lock.unlock()
+
+        previous?.cancel()
+    }
+
+    var isRunning: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return timer != nil
+    }
+}
+
 /// 核心防休眠状态机与 IOKit 电源断言管理器。
 @MainActor
 final class SleepManager: ObservableObject {
@@ -275,10 +316,10 @@ final class SleepManager: ObservableObject {
     }
 
     private let assertionGuard: AssertionGuard
+    private let timerBox = CountdownTimerBox()
     private let launchAtLoginProvider: LaunchAtLoginProviding
     private let userDefaults: UserDefaults
     private let now: @Sendable () -> Date
-    private var countdownTimer: Timer?
     private nonisolated(unsafe) var terminationObserver: NSObjectProtocol?
 
     init(
@@ -314,11 +355,13 @@ final class SleepManager: ObservableObject {
         }
 
         let guardRef = self.assertionGuard
+        let timerRef = self.timerBox
         self.terminationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification,
             object: nil,
             queue: .main
         ) { _ in
+            timerRef.cancel()
             guardRef.releaseIfNeeded()
         }
     }
@@ -327,6 +370,7 @@ final class SleepManager: ObservableObject {
         if let observer = terminationObserver {
             NotificationCenter.default.removeObserver(observer)
         }
+        timerBox.cancel()
         assertionGuard.releaseIfNeeded()
     }
 
@@ -402,6 +446,7 @@ final class SleepManager: ObservableObject {
         invalidateTimer()
         assertionGuard.releaseIfNeeded()
         resetSessionState()
+        lastErrorMessage = nil
     }
 
     /// 切换防休眠模式。若会话处于激活状态，会先释放旧断言再创建新模式对应的断言，同时保留剩余定时。
@@ -445,7 +490,12 @@ final class SleepManager: ObservableObject {
 
     /// 同步系统设置中的最新登录项状态。
     func refreshLaunchAtLoginStatus() {
-        launchAtLoginStatus = launchAtLoginProvider.status
+        let updatedStatus = launchAtLoginProvider.status
+        if updatedStatus != launchAtLoginStatus,
+           lastErrorMessage?.hasPrefix("开机自启动设置失败") == true {
+            lastErrorMessage = nil
+        }
+        launchAtLoginStatus = updatedStatus
     }
 
     /// 打开系统设置 → 通用 → 登录项面板。
@@ -478,19 +528,21 @@ final class SleepManager: ObservableObject {
         userDefaults.set(newMode.rawValue, forKey: DefaultsKey.mode)
     }
 
+    /// 当前内部倒计时定时器是否处于运行状态（供测试校验）。
+    var isCountdownTimerRunning: Bool {
+        timerBox.isRunning
+    }
+
     private func startTimer() {
-        let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+        timerBox.schedule(interval: 0.5) { [weak self] in
             Task { @MainActor [weak self] in
                 self?.tick()
             }
         }
-        RunLoop.main.add(timer, forMode: .common)
-        countdownTimer = timer
     }
 
     private func invalidateTimer() {
-        countdownTimer?.invalidate()
-        countdownTimer = nil
+        timerBox.cancel()
     }
 
     private func resetSessionState() {

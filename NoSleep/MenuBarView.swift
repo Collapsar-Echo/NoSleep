@@ -213,8 +213,7 @@ struct MenuBarView: View {
             sectionDivider
 
             MenuActionRow(title: "关闭 NoSleep", shortcutText: "⌘Q") {
-                sleepManager.stop()
-                NSApplication.shared.terminate(nil)
+                quitApplication()
             }
             .keyboardShortcut("q", modifiers: .command)
         }
@@ -367,6 +366,7 @@ struct MenuBarView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Color.accentColor)
+                .keyboardShortcut(.cancelAction)
 
                 Spacer()
 
@@ -425,13 +425,26 @@ struct MenuBarView: View {
             }
             .padding(.horizontal, 12)
             .padding(.bottom, 4)
+
+            Button("") {
+                quitApplication()
+            }
+            .keyboardShortcut("q", modifiers: .command)
+            .opacity(0)
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
         }
     }
 
     // MARK: - 辅助方法
 
+    private func quitApplication() {
+        sleepManager.stop()
+        NSApplication.shared.terminate(nil)
+    }
+
     private var appVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.1"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.2"
     }
 
     private var sectionDivider: some View {
